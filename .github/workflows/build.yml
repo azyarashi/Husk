@@ -1,0 +1,109 @@
+name: Build Husk
+
+on:
+    push:
+        branches: [ci]
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: husk-build-${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build:
+        runs-on: xcode-27
+        timeout-minutes: 60
+        env:
+            HOMEBREW_NO_AUTO_UPDATE: "1"
+            CARGO_TERM_COLOR: always
+            DD: /tmp/husk_ipa
+        defaults:
+            run:
+                shell: bash
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+              with:
+                  submodules: recursive
+                  persist-credentials: false
+
+            - name: Install Metal Toolchain
+              run: xcodebuild -downloadComponent MetalToolchain
+
+            - name: Install build dependencies
+              run: |
+                  brew install meson xcodegen qemu autoconf automake libtool
+                  python3 -m pip install --disable-pip-version-check --target "$RUNNER_TEMP/husk-python" PyYAML
+                  echo "PYTHONPATH=$RUNNER_TEMP/husk-python" >> "$GITHUB_ENV"
+
+            - name: Set up Rust
+              run: |
+                  if ! command -v rustup >/dev/null 2>&1; then
+                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+                  fi
+                  source "$HOME/.cargo/env"
+                  echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+                  rustup toolchain install stable --profile minimal
+                  rustup default stable
+                  rustup target add aarch64-apple-ios
+
+            - name: Restore dependency builds
+              id: dependency-cache
+              uses: actions/cache/restore@v6
+              with:
+                  path: |
+                      third_party/
+                      build/ios-arm64/
+                      build/stamps/
+                  key: husk-xcode27-v1-${{ hashFiles('scripts/sources.sh', 'scripts/build*_ios.sh', 'patches/**') }}-${{ github.sha }}
+                  restore-keys: |
+                      husk-xcode27-v1-${{ hashFiles('scripts/sources.sh', 'scripts/build*_ios.sh', 'patches/**') }}-
+
+            - name: Build IPA and TIPA
+              run: |
+                  mkdir -p build/logs
+                  bash scripts/ci_build.sh "$GITHUB_WORKSPACE/build/Husk.ipa" 2>&1 | tee build/logs/ci-build.log
+                  test -s build/Husk.ipa
+                  test -s build/Husk.tipa
+
+            - name: Upload IPA
+              uses: actions/upload-artifact@v7
+              with:
+                  name: Husk.ipa
+                  path: build/Husk.ipa
+                  if-no-files-found: error
+                  compression-level: 0
+                  retention-days: 14
+
+            - name: Upload TIPA
+              uses: actions/upload-artifact@v7
+              with:
+                  name: Husk.tipa
+                  path: build/Husk.tipa
+                  if-no-files-found: error
+                  compression-level: 0
+                  retention-days: 14
+
+            - name: Upload build logs
+              if: always()
+              uses: actions/upload-artifact@v7
+              with:
+                  name: Husk-build-logs
+                  path: |
+                      build/logs/
+                      ${{ env.DD }}/build.log
+                  if-no-files-found: ignore
+                  retention-days: 14
+
+            - name: Save dependency builds
+              if: always() && steps.dependency-cache.outcome == 'success' && steps.dependency-cache.outputs.cache-hit != 'true'
+              uses: actions/cache/save@v6
+              with:
+                  path: |
+                      third_party/
+                      build/ios-arm64/
+                      build/stamps/
+                  key: ${{ steps.dependency-cache.outputs.cache-primary-key }}
