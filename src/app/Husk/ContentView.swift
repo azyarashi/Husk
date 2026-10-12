@@ -35,6 +35,7 @@ struct ContentView: View {
     @ObservedObject private var massTest = MassTest.shared
     @ObservedObject private var updates = AppUpdates.shared
     @State private var showWhatsNew = false
+    @AppStorage(Holiday.key) private var holiday = true
 
     var body: some View {
         ZStack {
@@ -60,11 +61,20 @@ struct ContentView: View {
                     .tabItem { Label("Store", systemImage: "cart.fill") }
                     .tag(HuskTab.store)
 
+                FAQTab()
+                    .tabItem { Label("FAQ", systemImage: "questionmark.circle.fill") }
+                    .tag(HuskTab.help)
+
                 SettingsTab()
                     .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                     .tag(HuskTab.settings)
             }
             .opacity(showGuestScreen && started && runner.isRunning ? 0 : 1)
+
+            // Christmas: snow over the tabs (never over Android or an app's window, which come after it)
+            if holiday && !(showGuestScreen && started && runner.isRunning) {
+                Snowfall().ignoresSafeArea()
+            }
 
             // Multitasking: an app in a window over everything else in Husk (AppWindows.swift).
             AppWindowLayer()
