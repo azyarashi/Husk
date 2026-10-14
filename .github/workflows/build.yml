@@ -2,7 +2,7 @@ name: Build Husk
 
 on:
     push:
-        branches: [ci]
+        branches: [ci, main]
     workflow_dispatch:
 
 permissions:
